@@ -1,0 +1,14 @@
+{
+  
+  "name": "file-translater",
+  "version": "0.1",
+  "description": "App for translate js, json and more formats files.",
+  "bin": "ft.js",
+  "dependencies": {
+    "axios": "^0.27.2"
+  },
+  "pkg": {
+    "scripts": "lng/*",
+    "outputPath": "dist"
+  }
+}
