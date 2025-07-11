@@ -1,4 +1,5 @@
 const fs = require('fs');
+const path = require('path');
 const rli = require('readline').createInterface({
   input: process.stdin,
   output: process.stdout
@@ -8,219 +9,246 @@ const conf = JSON.parse(fs.readFileSync(`config.json`, "utf8"));
 const lngs = conf.languages;
 const lang = conf.app_language;
 
-async function translate(lng, text, isArray = true) {
-  await new Promise((resolve) => setTimeout(resolve, 1000));
-  if (/^\d+$/.test(text)) {
-    return `"${text}"`;
-  }
-
-  let res = `"${text}"`;
-  let res_data = [];
-  if (text.indexOf('# ') > -1) res_data = text.split('# ');
-  if (res_data.length > 0) {
-    text = res_data[1];
-  }
-  let url;
-  try {
-    url = `${conf.translate_url}?lang=ru-${lng}&text=${encodeURIComponent(text)}`;
-  } catch (error) {
-    console.log(`Error while encoding URL: ${error}`);
-    return text;
-  }
-
-  try {
-    let response = await axios.get(url);
-    if (response.data.code !== 200) return '';
-    res = `"${response.data.text[0]}"`;
-    if (res_data.length > 0) {
-      res = `${res_data[0]}# ${response.data.text[0]}`;
-    }
-    if (isArray) {
-      res = `"${response.data.text[0]}"`;
-      if (res.indexOf('\n') > -1) res = `\`${response.data.text[0]}\``;
-    }
-  } catch (e) {
-    console.log(`Error while translating URL (${url}): ${e}`);
-  }
-  return res;
-}
-
-async function toTranslate(res, lng, fileData, isArray = false, isJson = false) {
-  await new Promise(r => setTimeout(r, 1000));
-  let text;
-  if (isArray === false) {
-    text = `{\n`;
-  } else {
-    text = '[';
-  }
-  let keys = Object.keys(res);
-  for (let i = 0; i < keys.length; i++) {
-    let el = keys[i];
-    if (typeof el !== 'number' && isNaN(el)) text += `"${el}": `;
-    if (typeof res[el] === 'string') {
-      if (isJson == true) {
-        let percent = (i / keys.length) * 100;
-        console.log(`${lng}: ${percent.toFixed(2)}%`);
-      }
-      if (isArray == true) {
-        if (el === '0' && (/[a-zA-Z]/.test(res[el]) || isNaN(parseFloat(res[el])))) {
-          text += `"${res[el]}"`;
-        } else {
-          text += `${await translate(lng, res[el])}`;
-        }
-        if (i < keys.length - 1) {
-          text += ',';
-        }
-      } else {
-        text += `${await translate(lng, res[el])}`;
-        if (i < keys.length - 1) {
-          text += ',\n';
-        }
-      }
-    } else if (Array.isArray(res[el])) {
-      let arr = '[';
-      for (let n in res[el]) {
-        let l = res[el][n];
-        if (typeof l === 'string') {
-          if (n === 0 && (/[a-zA-Z]/.test(l) || isNaN(parseFloat(l)))) {
-            arr += `${l}`;
-          } else {
-            arr += `${await translate(lng, l)}`;
-          }
-          if (n < res[el].length - 1) {
-            arr += ',';
-          }
-        } else {
-          arr += `${await toTranslate(l, lng, fileData, true)}`;
-          if (n < res[el].length - 1) {
-            arr += ', ';
-          }
-        }
-      }
-      arr += ']';
-      text += `${arr}`;
-      if (i < keys.length - 1) {
-        text += ',\n';
-      }
-    } else if (typeof res[el] === 'object' && !Array.isArray(res[el])) {
-      let percent = (i / keys.length) * 100;
-      console.log(`${lng}: ${percent.toFixed(2)}%`);
-      text += `${await toTranslate(res[el], lng, fileData)}`
-      if (i < keys.length - 1) {
-        text += ',\n';
-      }
-    } else {
-      text += `${res[el]}`;
-      if (i < keys.length - 1) {
-        text += ',\n';
-      }
-    }
-  }
-  if (isArray === false) {
-    text += `\n}`;
-  } else {
-    text += `]`;
-  }
-  return text;
-}
-
+// Функция для ввода пользователя
 function input(prompt) {
-  return new Promise((callbackFn, errorFn) => {
-    rli.question(prompt, (uinput) => {
-      callbackFn(uinput);
-    }, () => {
-      errorFn();
+  return new Promise((resolve, reject) => {
+    rli.question(prompt, (answer) => {
+      resolve(answer);
+    }, (error) => {
+      reject(error);
     });
   });
 }
 
-let q = '';
-let starting = '';
-let finish_q = '';
-if (lang == 'en') {
-  q = 'Specify the name of the file located in the lng folder. For example, text.json';
-  starting = 'Launching a translation to';
-  finish_q = 'To close, press Enter.';
-} else if (lang === 'zh') {
-  q = `指定位于lng文件夹中的文件的名称。 例如，文本。json格式`;
-  starting = `启动转移到`;
-  finish_q = `要关闭，请按Enter键.`;
-} else if (lang === 'es') {
-  q = `Especifique el nombre del archivo que se encuentra en la carpeta lng. Por ejemplo, text.json`;
-  starting = `Iniciar la traducción a`;
-  finish_q = `Para cerrar, presione la tecla Intro.`;
-} else if (lang === 'ar') {
-  q = `حدد اسم الملف الموجود في مجلد الغاز الطبيعي المسال. على سبيل المثال ، النص.جسون`;
-  starting = `إطلاق نقل إلى`;
-  finish_q = `للإغلاق ، اضغط على إدخال...`;
-} else if (lang === 'ko') {
-  q = `파일 이름을 지정합니다. 예:텍스트.제이슨`;
-  starting = `다음으로 전송 시작`;
-  finish_q = `닫으려면 엔터 키를 누릅니다...`;
-} else if (lang === 'ru') {
-  q = 'Укажите имя файла, находящегося в папке lng. Например, text.json';
-  starting = 'Запуск перевода на';
-  finish_q = 'Для закрытия нажмите Enter...';
+// Функция для разбивки текста на предложения
+function splitIntoSentences(text) {
+  const sentenceEnders = /([.?!])\s+(?=[A-ZА-Я])/g;
+  return text.split(sentenceEnders).reduce((acc, fragment, index, array) => {
+    if (sentenceEnders.test(fragment)) {
+      acc[acc.length - 1] += fragment;
+    } else {
+      acc.push(fragment);
+    }
+    return acc;
+  }, []).filter(sentence => sentence.trim().length > 0);
 }
 
-async function main() {
-  let answer = await input(q);
-  let res = {};
-  let [filename, format] = answer.split('.');
-  let start_file;
-  if (answer.split('.')[1] === 'json') {
-    res = JSON.parse(fs.readFileSync(`${process.cwd()}/lng/${answer}`, "utf8"));
-    start_file = '';
-  } else if (answer.split('.')[1] === 'js') {
-    res = require(`${process.cwd()}/lng/${answer}`);
-    start_file = 'module.exports = ';
-  } else {
-    res = fs.readFileSync(`lng/${answer}`, "utf8");
+// Функция для объединения предложений
+function joinSentences(sentences) {
+  return sentences.join(' ');
+}
+
+// Функция для перевода текста с разбиением на предложения
+async function translate(lng, text) {
+  await new Promise((resolve) => setTimeout(resolve, 1000));
+
+  if (/^\d+$/.test(text)) {
+    return text;
   }
 
-  let datetime = new Date().getTime();
-  if (!fs.existsSync(`${process.cwd()}/lng/${filename}-${format}-${datetime}`)) {
-    fs.mkdirSync(`${process.cwd()}/lng/${filename}-${format}-${datetime}`); //Create dir in case not found
+  // Обработка заголовка, если присутствует
+  const res_data = text.indexOf('# ') > -1 ? text.split('# ') : [];
+  const textToTranslate = res_data.length > 1 ? res_data[1] : text;
+
+  // Разбиваем текст на предложения
+  const sentences = splitIntoSentences(textToTranslate);
+  const translatedSentences = [];
+
+  // Определяем максимальную длину URL (с запасом)
+  const MAX_URL_LENGTH = 2000; // Вы можете изменить это значение при необходимости
+  const baseUrl = conf.translate_url;
+  const langParam = `ru-${lng}`;
+
+  let currentBatch = [];
+  let currentLength = baseUrl.length + langParam.length + 20; // 20 на прочие символы (?lang=&text=)
+
+  for (let i = 0; i < sentences.length; i++) {
+    const sentence = sentences[i];
+
+    // Кодируем предложение и оцениваем длину URL, если добавим его
+    const encodedSentence = encodeURIComponent(sentence);
+    const newLength = currentLength + encodedSentence.length + (currentBatch.length > 0 ? 3 : 0); // +3 для '%0A' (кодировка '\n')
+
+    if (newLength < MAX_URL_LENGTH) {
+      currentBatch.push(sentence);
+      currentLength = newLength;
+    } else {
+      // Отправляем текущий пакет предложений
+      const translatedText = await sendGetRequest(baseUrl, langParam, currentBatch);
+      translatedSentences.push(translatedText);
+
+      // Начинаем новый пакет
+      currentBatch = [sentence];
+      currentLength = baseUrl.length + langParam.length + encodedSentence.length + 20;
+    }
   }
 
-  console.log(`${starting} ${lngs.join(', ')}...`);
-  const translations = await Promise.all(
-    lngs.map(async (lng) => {
-      let text = '';
-      if (typeof start_file !== 'undefined') {
-        if (format === 'json') {
-          let translated = await toTranslate(res, lng, res, false, true);
-          text = `${start_file}\n${translated}`;
-        } else {
-          let translated = await toTranslate(res, lng, res);
-          text = `${start_file}\n${translated}`;
-        } // is no json.
+  // Отправляем оставшиеся предложения
+  if (currentBatch.length > 0) {
+    const translatedText = await sendGetRequest(baseUrl, langParam, currentBatch);
+    translatedSentences.push(translatedText);
+  }
+
+  // Объединяем переведенные пакеты
+  const finalTranslatedText = translatedSentences.join('\n');
+
+  return res_data.length > 1 ? `${res_data[0]}# ${finalTranslatedText}` : finalTranslatedText;
+}
+
+// Функция для отправки GET-запроса и получения перевода
+async function sendGetRequest(baseUrl, langParam, sentences) {
+  const textParam = sentences.join('\n');
+  const encodedText = encodeURIComponent(textParam);
+
+  const url = `${baseUrl}?lang=${encodeURIComponent(langParam)}&text=${encodedText}`;
+
+  try {
+    const response = await axios.get(url);
+    if (response.data.code !== 200) {
+      console.log(`Ошибка перевода. Код ответа: ${response.data.code}`);
+      return sentences.join('\n'); // Возвращаем оригинальные предложения в случае ошибки
+    }
+
+    return response.data.text.join('\n');
+  } catch (e) {
+    console.log(`Ошибка при запросе перевода: ${e}`);
+    return sentences.join('\n'); // Возвращаем оригинальные предложения в случае ошибки
+  }
+}
+
+// Функция для рекурсивного перевода объекта или массива
+async function toTranslate(res, lng, isArray = false, isJson = false, isJs = false) {
+  let text = isArray ? '[' : '{\n';
+  const keys = Object.keys(res);
+
+  for (let i = 0; i < keys.length; i++) {
+    const el = keys[i];
+    const value = res[el];
+
+    if (!isArray) {
+      text += `"${el}": `;
+    }
+
+    if (typeof value === 'string') {
+      const translated = await translate(lng, value);
+      const isMultiline = translated.includes('\n');
+
+      if (isJs && isMultiline || isJs && translated.indexOf('"') > -1) {
+        text += `\`${translated}\``;
       } else {
-        let strs = res.split('\n');
+        text += isMultiline ? `\`${translated}\`` : `"${translated}"`;
+      }
+    } else if (Array.isArray(value)) {
+      const nestedArray = value.map(async (item) => {
+        if (typeof item === 'string') {
+          const translatedItem = await translate(lng, item);
+          const isMultiline = translatedItem.includes('\n');
+
+          return isJs && isMultiline ? `\`${translatedItem}\`` : `"${translatedItem}"`;
+        } else if (typeof item === 'object') {
+          return await toTranslate(item, lng, true, isJson, isJs);
+        }
+        return item;
+      });
+
+      text += `[${(await Promise.all(nestedArray)).join(', ')}]`;
+    } else if (typeof value === 'object' && value !== null) {
+      text += await toTranslate(value, lng, false, isJson, isJs);
+    } else {
+      text += value;
+    }
+
+    if (i < keys.length - 1) {
+      text += isArray ? ', ' : ',\n';
+    }
+    await new Promise(resolve => setTimeout(resolve, 1000));
+  }
+
+  text += isArray ? ']' : '\n}';
+  return text;
+}
+
+// Основная функция локализации
+async function main() {
+  try {
+    const answer = await input(lang === 'ru' ? 'Укажите имя файла в папке lng. Например, text.json' : 'Specify the name of the file in the lng folder. For example, text.json');
+
+    const [filename, format] = answer.split('.');
+    if (!filename || !format) {
+      console.log('Некорректный формат файла. Убедитесь, что указано имя файла с расширением.');
+      rli.close();
+      return;
+    }
+
+    const filePath = path.join(process.cwd(), 'lng', answer);
+    let res;
+    let isJs = false;
+    let start_file = '';
+
+    if (format === 'json') {
+      res = JSON.parse(fs.readFileSync(filePath, "utf8"));
+    } else if (format === 'js') {
+      res = require(filePath);
+      start_file = 'module.exports = ';
+      isJs = true;
+    } else {
+      res = fs.readFileSync(filePath, "utf8");
+    }
+
+    const datetime = new Date().getTime();
+    const outputDir = path.join(process.cwd(), 'lng', `${filename}-${format}-${datetime}`);
+    if (!fs.existsSync(outputDir)) {
+      fs.mkdirSync(outputDir, { recursive: true });
+    }
+
+    console.log(`Запуск перевода на ${lngs.join(', ')}...`);
+
+    const translations = [];
+    const pauseDuration = 1000; // Пауза между переводами в миллисекундах
+    const totalLngs = lngs.length;
+
+    for (let index = 0; index < lngs.length; index++) {
+      const lng = lngs[index];
+      let text = '';
+      if (format === 'json' || format === 'js') {
+        text = `${start_file}${await toTranslate(res, lng, false, true, isJs)}`;
+      } else {
+        const strs = res.split('\n');
         text = '';
-        for (let l in strs) {
-          let str = strs[l];
-          let percent = ((parseInt(l) + 1) / strs.length) * 100;
-          console.log(`${lng}: ${percent.toFixed(2)}%`);
-          if (str === '') {
-            text += `\n`;
-          } else {
-            if (/[а-яА-ЯЁё]/.test(str)) {
-              text += `${await translate(lng, str, false)}\n`;
-            } else {
-              text += `${str}\n`;
-            }
+        for (let i = 0; i < strs.length; i++) {
+          const str = strs[i];
+          if (str.trim() === '') {
+            text += '\n';
+            continue;
           }
+
+          const translatedStr = await translate(lng, str);
+          const isMultiline = translatedStr.includes('\n');
+          text += isJs && isMultiline ? `${translatedStr}\n` : `"${translatedStr}"\n`;
+          await new Promise(resolve => setTimeout(resolve, pauseDuration));
         }
       }
-      fs.writeFileSync(`${process.cwd()}/lng/${filename}-${format}-${datetime}/${lng}.${format}`, text);
-      return lng;
-    })
-  );
 
-  console.log(`Translations completed for: ${translations.join(', ')}`);
-  await input(finish_q);
-  rli.close();
+      const outputFilePath = path.join(outputDir, `${lng}.${format}`);
+      fs.writeFileSync(outputFilePath, text, 'utf8');
+      translations.push(lng);
+
+      // Вычисление процента завершения
+      const percentage = Math.round(((index + 1) / totalLngs) * 100);
+      console.log(`Перевод на язык ${lng} завершен. Прогресс: ${percentage}%`);
+
+      // Пауза между переводами
+      await new Promise(resolve => setTimeout(resolve, pauseDuration));
+    }
+
+    console.log(`Переводы завершены для: ${translations.join(', ')}`);
+    await input('Для закрытия нажмите Enter...' || 'Press Enter to close...');
+    rli.close();
+
+  } catch (error) {
+    console.error(`Произошла ошибка: ${error}`);
+    rli.close();
+  }
 }
 
 main();
